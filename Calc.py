@@ -1,3 +1,6 @@
+import math
+from collections import defaultdict
+
 import API
 from scipy.stats import norm
 class DiagnosticCalculator:
@@ -9,6 +12,7 @@ class DiagnosticCalculator:
     def __init__(self):
         # self.patient_id = patient_id
         self._z_scores_cache = {}  # Кэш Z-оценок по metric_id
+        self._deltas_cache = {}
         self._percentiles_cache = {}  # Кэш процентилей по metric_id
         self._idx_cache = {}  # Кэш интегральных индексов по disease_id
 
@@ -102,9 +106,13 @@ class DiagnosticCalculator:
 
                 # Расчет Z-оценки
                 Z = (N - p50) / s
-
+                deltas = {
+                    "d-": max(0.0, Z*(-1)),
+                    "d+": max(0.0, Z)
+                }
                 # Кэшируем Z-оценку
-                self._z_scores_cache[metric_id] = Z
+                self._z_scores_cache[metric_id] = deltas
+                # self._deltas_cache[metric_id] = deltas
 
                 # Расчет процентиля
                 #P = norm.cdf(Z) * 100
@@ -116,7 +124,8 @@ class DiagnosticCalculator:
                 percentile_results.append({
                     "P": P,
                     "metric_id": metric_id,
-                    "Z": Z  # Сохраняем Z для возможного дальнейшего использования
+                    "Z": Z,  # Сохраняем Z для возможного дальнейшего использования,
+                    "deltas": deltas
                 })
 
             except (ValueError, ZeroDivisionError) as e:
@@ -184,40 +193,58 @@ class DiagnosticCalculator:
             list: Интегральные индексы по заболеваниям
         """
         # Создаем словарь для быстрого доступа к Z-оценкам
-        z_dict = {item['metric_id']: item['Z'] for item in percentile_results}
+        z_dict = {item['metric_id']: item['deltas'] for item in percentile_results}
 
-        # Словарь для накопления сумм по disease_id
+        grouped_weights = defaultdict(list)
+        for item in weights:
+            grouped_weights[item['disease_id']].append(item)
+
+        # Convert to regular dict if needed
+        grouped_weights = dict(grouped_weights)
+
+        grouped_by_disease = defaultdict(list)
+        for item in weights:
+            grouped_by_disease[item['disease_id']].append(item)
+
+        # Now loop through each disease group
         idxs_dict = {}
+        for disease_id, metrics in grouped_by_disease.items():
+            if disease_id == 1:  # Check if this is disease 1
+                # Do something with this disease
+                print(f"Processing disease {disease_id}")
 
-        for weight in weights:
-            disease_id = weight['disease_id']
-            metric_id = weight['metric_id']
+            # Loop through all metrics for this disease
+            for weight in metrics:
 
-            # Пропускаем, если метрики нет в результатах
-            if metric_id not in z_dict:
-                continue
+                metric_id = weight['metric_id']
+                w = float(weight['w'])
+                w_l = float(weight['w_l'])
+                dp = z_dict[metric_id]['d+']
+                dm = z_dict[metric_id]['d-']
+                if disease_id not in idxs_dict:
+                    idxs_dict[disease_id] = 0
+                contribution = w * dp + w_l * dm
+                idxs_dict[disease_id] += contribution
 
-            # Получаем вес и Z-оценку
-            w = float(weight['w'])
-            Z = z_dict[metric_id]
-
-            # Инициализируем сумму для заболевания
-            if disease_id not in idxs_dict:
-                idxs_dict[disease_id] = 0
-
-            # Добавляем вклад текущей метрики
-            contribution = w * abs(Z)
-            idxs_dict[disease_id] += contribution
-
-        # Преобразуем в список словарей
         Idxs = [{"disease_id": disease_id, "Idx": idx}
                 for disease_id, idx in idxs_dict.items()]
+        # Calculate denominator once
+        sum_exp = sum(math.exp(item['Idx']) for item in Idxs)
+
+        # Calculate probabilities
+        probabilities = [
+            {
+                'disease_id': item['disease_id'],
+                'Idx': item['Idx'],
+                'probability': round(math.exp(item['Idx']) / sum_exp * 100, 2)
+            }
+            for item in Idxs
+        ]
 
         # Кэшируем результаты
-        for idx_item in Idxs:
+        for idx_item in probabilities:
             self._idx_cache[idx_item['disease_id']] = idx_item['Idx']
-
-        return Idxs
+        return probabilities
 
     def _form_diagnostic_conclusions(self, Idxs, thresholds):
         """
@@ -234,33 +261,37 @@ class DiagnosticCalculator:
         thresholds_by_disease = self._group_thresholds_by_disease(thresholds)
 
         conclusions = []
-
         for idx_item in Idxs:
             disease_id = idx_item['disease_id']
             idx_value = idx_item['Idx']
 
-            # Пропускаем, если нет порогов для этого заболевания
-            if disease_id not in thresholds_by_disease:
-                continue
-
+            # # Пропускаем, если нет порогов для этого заболевания
+            # if disease_id not in thresholds_by_disease:
+            #     continue
             # Проверяем каждый порог для заболевания
-            for threshold in thresholds_by_disease[disease_id]:
-                tmin = threshold['Tmin']
-                tmax = threshold['Tmax']
-                print(threshold)
-                # Проверка попадания в диапазон
-                matches_tmin = tmin is None or idx_value >= tmin
-                matches_tmax = tmax is None or idx_value < tmax
-
-                if matches_tmin and matches_tmax:
-                    conclusions.append({
-                        'disease_id': disease_id,
-                        'C': threshold['C'],
-                        'C_id': threshold['C_id'],
-                        'idx': idx_value
-                    })
-                    break  # Первый подходящий порог
-
+            if disease_id != 2:
+                for threshold in thresholds_by_disease[disease_id]:
+                    tmin = threshold['Tmin']
+                    tmax = threshold['Tmax']
+                    matches_tmin = tmin is None or idx_value >= tmin
+                    matches_tmax = tmax is None or idx_value < tmax
+                    if matches_tmin and matches_tmax:
+                        conclusions.append({
+                            'disease_id': disease_id,
+                            'C': threshold['C'],
+                            'C_id': threshold['C_id'],
+                            'idx': idx_value,
+                            'probability': idx_item['probability']
+                        })
+            else:
+                conclusions.append({
+                    'disease_id': disease_id,
+                    'C': "-",
+                    'C_id': 1,
+                    'idx': idx_value,
+                    'probability': idx_item['probability']
+                })
+                break  # Первый подходящий порог
         return conclusions
 
     def _group_thresholds_by_disease(self, thresholds):

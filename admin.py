@@ -128,7 +128,7 @@ class AdminWindow:
             case 'Пациент':
                 selected_keys = ['personal_data', 'results']
             case 'Врач':
-                selected_keys = ['personal_data', 'weights', 'results']
+                selected_keys = ['personal_data', 'user_info', 'results']
         if(role != 'Администратор'):
             self.frame_data_dict = {key: FRAME_DEFINITIONS[key] for key in selected_keys}
         self._setup_window()
@@ -186,7 +186,7 @@ class AdminWindow:
                 'disease_id': {'required': True, 'numeric': True},
                 'Tmax': {'required': False, 'numeric': True},
                 'Tmin': {'required': False, 'numeric': True},
-                'C': {'required': True, 'numeric': True}
+                'C': {'required': True, 'numeric': False}
             },
             'test-results': {
                 'metric_values': {'required': False, 'numeric': True},
@@ -845,8 +845,12 @@ class AdminWindow:
 
                 # Поле для веса
                 weight_frame, weight_entry = self.create_labeled_entry(
-                    self.info_frame, "Весовой коэффициент: ", row_data.get("w", "")
+                    self.info_frame, "Вес верхнего отклонения: ", row_data.get("w", "")
                 )
+                weight_lower_frame, weight_lower_entry = self.create_labeled_entry(
+                    self.info_frame, "Вес нижнего отклонения: ", row_data.get("w_l", "")
+                )
+
                 save_button = tk.Button(
                     self.info_frame,
                     text="Сохранить" if is_edit else "Добавить",
@@ -855,7 +859,8 @@ class AdminWindow:
                         {
                             'disease_id': disease_combo.get_selected_value(),
                             'metric_id': metric_combo.get_selected_value(),
-                            'weight': weight_entry.get()
+                            'weight': weight_entry.get(),
+                            'weight_lower': weight_lower_entry.get()
                         },
                         lambda: API.post(
                             "update_weight_row", {
@@ -864,6 +869,7 @@ class AdminWindow:
                                 "disease_id": disease_combo.get_selected_value(),
                                 "metric_id": metric_combo.get_selected_value(),
                                 "weight": weight_entry.get(),
+                                "weight_lower": weight_lower_entry.get()
                             }
                         ) and self._refresh_tab()
                     )
@@ -913,6 +919,12 @@ class AdminWindow:
                 max_frame, max_entry = self.create_labeled_entry(self.info_frame, "Максимальный интегральный индекс: ", row_data["Tmax"])
                 min_frame, min_entry = self.create_labeled_entry(self.info_frame, "Минимальный интегральный индекс: ", row_data["Tmin"])
                 sev_frame, sev_entry = self.create_labeled_entry(self.info_frame, "Степень заболевания: ", row_data["C"])
+                print(                        {
+                            'disease_id': disease_combo.get_selected_value(),
+                            'Tmax': max_entry.get(),
+                            'Tmin': min_entry.get(),
+                            'C': sev_entry.get()
+                        })
                 save_button = tk.Button(
                     self.info_frame,
                     text="Сохранить" if is_edit else "Добавить",
@@ -956,6 +968,12 @@ class AdminWindow:
                                                wraplength=300,
                                                justify='left')
                     main_info_label.pack(anchor='w', pady=(10, 20))
+                    launch_diagnostics_button = tk.Button(
+                        self.info_frame,
+                        text="Запуск диагностики",
+                        command=lambda: self._launch_diagnostics()
+                    )
+                    launch_diagnostics_button.pack(pady=20)
                     tk.Label(self.info_frame,
                              text="Показатели ОМА\n (оставьте поле пустым, если показатель не замерялся):",
                              bg=COLORS['bg'],
@@ -1024,20 +1042,30 @@ class AdminWindow:
                             "metric_id": metric["id метрики"],
                             "name": metric["Название метрики"]
                         })
-                    previous_diagnostics_percentile = \
-                    API.get_table_data("metric_analysis_percentile_results", [table_row[0]])["info"]
-                    previous_diagnostics_conclusion = \
-                    API.get_table_data("metric_analysis_diagnostic_result", [table_row[0]])["info"]
-                    if previous_diagnostics_percentile is not None and previous_diagnostics_conclusion is not None:
 
-                        previous_diagnostics_label = tk.Label(self.info_frame,
+                    # Удаляем старый фрейм с историческими результатами, если он существует
+                    if hasattr(self, '_history_frame') and self._history_frame:
+                        self._history_frame.destroy()
+
+                    # СОЗДАЕМ ОТДЕЛЬНЫЙ ФРЕЙМ ДЛЯ ИСТОРИЧЕСКИХ РЕЗУЛЬТАТОВ
+                    self._history_frame = tk.Frame(self.info_frame, bg=COLORS['bg'])
+                    self._history_frame.pack(fill='x', pady=(10, 0))
+
+                    previous_diagnostics_percentile = \
+                        API.get_table_data("metric_analysis_percentile_results", [table_row[0]])["info"]
+                    previous_diagnostics_conclusion = \
+                        API.get_table_data("metric_analysis_diagnostic_result", [table_row[0]])["info"]
+
+                    if previous_diagnostics_percentile is not None and previous_diagnostics_conclusion is not None:
+                        previous_diagnostics_label = tk.Label(self._history_frame,
                                                               text=f"Предыдущие результаты диагностики:",
                                                               bg=COLORS['bg'],
                                                               font=('Arial', 12),
                                                               wraplength=300,
                                                               justify='left')
                         previous_diagnostics_label.pack(anchor='w', pady=(10, 20))
-                        tk.Label(self.info_frame,
+
+                        tk.Label(self._history_frame,
                                  text="Анализ возможных заболеваний:",
                                  bg=COLORS['bg'],
                                  font=('Arial', 10, 'bold')).pack(anchor='w', pady=(0, 10))
@@ -1045,19 +1073,22 @@ class AdminWindow:
                         for conclusion in previous_diagnostics_conclusion:
                             text = f"• {conclusion['name']}, уровень: {conclusion['severity']} "
                             text += f"(интегральный индекс = {conclusion['idx']})"
-                            tk.Label(self.info_frame,
+                            tk.Label(self._history_frame,
                                      text=text,
                                      bg=COLORS['bg'],
                                      wraplength=300).pack(anchor='w', padx=10)
-                        tk.Label(self.info_frame,
+
+                        tk.Label(self._history_frame,
                                  text="Процентили по метрикам:",
                                  bg=COLORS['bg'],
                                  font=('Arial', 10, 'bold')).pack(anchor='w', pady=(10, 0))
+
                         for previous_diagnostic in previous_diagnostics_percentile:
-                            text = f"• {previous_diagnostic["metric_name"]}: {previous_diagnostic['percentile_rank']}%"
-                            tk.Label(self.info_frame,
+                            text = f"• {previous_diagnostic['metric_name']}: {previous_diagnostic['percentile_rank']}%"
+                            tk.Label(self._history_frame,
                                      text=text,
                                      bg=COLORS['bg']).pack(anchor='w', padx=10)
+
                     calculate_button = tk.Button(
                         self.info_frame,
                         text="Анализ результатов",
@@ -1137,10 +1168,15 @@ class AdminWindow:
             self.gender_frame.pack_forget()
     def _calculate_diagnostics(self, metrics_entries, examination_id):
         """Расчет диагностики с использованием отдельного класса"""
-        # Удаляем предыдущий фрейм с результатами
-        for widget in self.info_frame.winfo_children():
-            if hasattr(widget, '_is_results_frame') and widget._is_results_frame:
-                widget.destroy()
+        # Удаляем предыдущие результаты (и старые, и новые)
+        if hasattr(self, '_history_frame') and self._history_frame:
+            self._history_frame.destroy()
+            self._history_frame = None
+
+        # if self.results_frame is not None:
+        #     print("DELETE FRAME")
+        #     self.results_frame.destroy()
+        #     self.results_frame = None
 
         # Подготавливаем данные метрик
         metric_values = []
@@ -1169,14 +1205,24 @@ class AdminWindow:
                      text="Анализ возможных заболеваний:",
                      bg=COLORS['bg'],
                      font=('Arial', 10, 'bold')).pack(anchor='w', pady=(0, 10))
-
             for conclusion in conclusions:
-                text = f"• {conclusion['name']}, уровень: {conclusion['C']} "
-                text += f"(интегральный индекс = {conclusion['idx']:.2f})"
-                tk.Label(results_frame,
-                         text=text,
-                         bg=COLORS['bg'],
-                         wraplength=300).pack(anchor='w', padx=10)
+                text = f"• {conclusion['name']}, уровень: {conclusion['C']}, "
+                text += f"\nВероятность = {conclusion['probability']}% "
+                text += f"(интегральная оценка = {conclusion['idx']:.2f})"
+                # text += f" (интегральная оценка = 3,92)\n"
+                # text += f"• Норма"
+                # # text += f"(интегральный индекс = {conclusion['idx']:.2f})"
+                # text += f"\nВероятность = 72%"
+                # text += f" (интегральная оценка = 4,83)\n"
+                label = tk.Label(
+                    results_frame,
+                    text=text,
+                    bg=COLORS['bg'],
+                    anchor='w',  # or 'nw' if you also want top alignment
+                    justify='left',  # 'left', 'center', or 'right'
+                    # Optional: wraplength=... if you want automatic line wrapping
+                )
+                label.pack(anchor='w', padx=10, pady=5)
         else:
             tk.Label(results_frame,
                      text="По результатам анализа заболеваний не выявлено.",
@@ -1231,11 +1277,6 @@ class AdminWindow:
         # Validate and save
         return self.validate_and_save("test-results", validation_data, save_function)
     def _save_data_to_db(self, metric_values, percentile_results, conclusions, examination_id):
-        print("++++")
-        print(metric_values)
-        print(percentile_results)
-        print(conclusions)
-        print("++++")
 
         result = API.post("update_examination_session", {
             "examination_session_id": examination_id,
@@ -1310,10 +1351,12 @@ class AdminWindow:
                 data["info"].pop("Дата рождения")
                 data["info"].pop("Пол")
             data = {'info': [data["info"]]}
-            print(data)
         else:
             data = API.get_table_data(frame_info['api_url'], None)
-        print(data)
+            if frame_info['api_url'] == 'users' and self.role == "Врач":
+                if data and 'info' in data:
+                    print(data['info'])
+                    data['info'] = [user for user in data['info'] if user.get('Роль') == "Пациент"]
         if data and 'info' in data and len(data['info']) > 0:
             self._create_and_populate_treeview(frame_info, data)
         else:
@@ -1385,165 +1428,7 @@ class AdminWindow:
         label.pack(side='left')
         cal.pack(side='left', fill='x', expand=True, padx=(5, 0))
         return frame, cal
-    # def fill_info_frame(self, table_row, api_url):
-    #     """Fill info frame"""
-    #
-    #     print(f"API URL: {api_url} \nrow: {table_row} id: {table_row[0]}")
-    #     self.clear_frame(self.info_frame)
-    #     row_data = {}
-    #     if api_url != "weights":
-    #         row_data = API.get_row_data(api_url, table_row[0])["info"]
-    #         print(row_data)
-    #
-    #     match (api_url):
-    #         case "users":
-    #             main_info_label = tk.Label(self.info_frame,
-    #                                        text=f"Данные для пользователя с id: {row_data["id"]}",
-    #                                        bg = COLORS['bg'],
-    #                                        font = ('Arial', 12),
-    #                                        wraplength = 300,
-    #                                        justify = 'left')
-    #             main_info_label.pack(anchor='w', pady=(10, 20))
-    #
-    #             # Create all entries using the function
-    #             username_frame, username_entry = self.create_labeled_entry(
-    #                 self.info_frame, "Логин: ", row_data["username"]
-    #             )
-    #             password_frame, password_entry = self.create_labeled_entry(
-    #                 self.info_frame, "Пароль: ", row_data["password"]
-    #             )
-    #             full_name_frame, full_name_entry = self.create_labeled_entry(
-    #                 self.info_frame, "ФИО: ", row_data["name"]
-    #             )
-    #             all_roles = API.get_table_data("roles", None)["info"]
-    #             role_frame, role_combobox = self.create_labeled_combobox(
-    #                 self.info_frame, "Роль: ", int(row_data["role_id"]), all_roles, "name"
-    #             )
-    #             if row_data["role_id"] == 4:
-    #                 date_of_birth_frame, date_of_birth_entry = self.create_labeled_calendar(
-    #                     self.info_frame, "Дата рождения: ", row_data["birth_date"]
-    #                 )
-    #                 gender_frame, gender_entry = self.create_labeled_combobox(
-    #                     self.info_frame, "Пол: ", 1 if row_data["gender"] == "М" else 2, [{"id": 1, "gender": "М"}, {"id":2, "gender":"Ж"}], "gender"
-    #                 )
-    #         case "medications":
-    #             main_info_label = tk.Label(self.info_frame,
-    #                                        text=f"Данные для лекарства с id: {row_data["id"]}",
-    #                                        bg=COLORS['bg'],
-    #                                        font=('Arial', 12),
-    #                                        wraplength=300,
-    #                                        justify='left')
-    #             main_info_label.pack(anchor='w', pady=(10, 20))
-    #
-    #             # Medicine name entry
-    #             name_frame, name_entry = self.create_labeled_entry(
-    #                 self.info_frame, "Название: ", row_data["name"]
-    #             )
-    #
-    #             # Get all diseases
-    #             all_diseases = API.get_table_data("diseases", None)["info"]
-    #
-    #             # Create disease relationship management sections
-    #             # 1. Diseases treated by this medicine
-    #             self._create_relationship_section(
-    #                 self.info_frame,
-    #                 section_title="Лечение заболеваний:",
-    #                 api_url=api_url,
-    #                 item_id=row_data["id"],
-    #                 relationship_table="medicine_treats_disease",
-    #                 item_key="medicine_id",
-    #                 related_key="disease_id",
-    #                 related_items=all_diseases,
-    #                 display_key="Название"
-    #             )
-    #
-    #             # 2. Diseases contraindicated for this medicine
-    #             self._create_relationship_section(
-    #                 self.info_frame,
-    #                 section_title="Противопоказания при заболеваниях:",
-    #                 api_url=api_url,
-    #                 item_id=row_data["id"],
-    #                 relationship_table="medicine_contraindicated_for",
-    #                 item_key="medicine_id",
-    #                 related_key="disease_id",
-    #                 related_items=all_diseases,
-    #                 display_key="Название"
-    #             )
-    #
-    #             # Save button for medication data
-    #             save_button = tk.Button(
-    #                 self.info_frame,
-    #                 text="Сохранить изменения",
-    #                 command=lambda: self._save_medication_changes(
-    #                     row_data["id"], name_entry.get()
-    #                 )
-    #             )
-    #             save_button.pack(pady=20)
-    #         case "diseases":
-    #             main_info_label = tk.Label(self.info_frame,
-    #                                        text=f"Данные для заболевания с id: {row_data["id"]}",
-    #                                        bg=COLORS['bg'],
-    #                                        font=('Arial', 12),
-    #                                        wraplength=300,
-    #                                        justify='left')
-    #             main_info_label.pack(anchor='w', pady=(10, 20))
-    #             name_frame, name_entry = self.create_labeled_entry(
-    #                 self.info_frame, "Название: ", row_data["name"]
-    #             )
-    #         case "weights":
-    #             row_data = API.get_row_data("weights_by_ids", [table_row[0], table_row[1]])["info"]
-    #             row_data= row_data[0]
-    #             print(row_data)
-    #             main_info_label = tk.Label(self.info_frame,
-    #                                        text=f"Редактирование весового коэффициента",
-    #                                        bg=COLORS['bg'],
-    #                                        font=('Arial', 12),
-    #
-    #                                        justify='left')
-    #             main_info_label.pack(anchor='w', pady=(10, 20))
-    #             weight_frame, weight_entry = self.create_labeled_entry(self.info_frame, "Весовой коэффициент: ", row_data["w"])
-    #             weight_entry = {
-    #                 "disease_id": row_data["disease_id"],
-    #                 "metric_id": row_data["metric_id"],
-    #                 "weight": weight_entry,
-    #             }
-    #             save_button = tk.Button(
-    #                 self.info_frame,
-    #                 text="Сохранить",
-    #                 command=lambda: self._update_weight_row(weight_entry)
-    #             )
-    #             save_button.pack(pady=20)
-    #         case "diagnostic-thresholds":
-    #             row_data = row_data[0]
-    #             main_info_label = tk.Label(self.info_frame,
-    #                                        text=f"Редактирование порогового значения #:{table_row[0]}\n для заболевания {table_row[1]}"
-    #                                             f"\n(предельные значения оставьте пустыми)",
-    #                                        bg=COLORS['bg'],
-    #                                        font=('Arial', 12),
-    #                                        justify='left')
-    #             main_info_label.pack(anchor='w', pady=(10, 20))
-    #             max_frame, max_entry = self.create_labeled_entry(self.info_frame, "Максимальный интегральный индекс: ", row_data["Tmax"])
-    #             min_frame, min_entry = self.create_labeled_entry(self.info_frame, "Минимальный интегральный индекс: ", row_data["Tmin"])
-    #             sev_frame, sev_entry = self.create_labeled_entry(self.info_frame, "Степень заболвения: ", row_data["C"])
-    #             data = {
-    #                 "id": table_row[0],
-    #                 "Tmax": max_entry,
-    #                 "Tmin": min_entry,
-    #                 "C": sev_entry,
-    #             }
-    #
-    #             save_button = tk.Button(
-    #                 self.info_frame,
-    #                 text="Сохранить",
-    #                 command=lambda: self._update_sev_row(data)
-    #             )
-    #             save_button.pack(pady=20)
-    #         # case "reference-values":
-    #         #
-    #         # case "test-results":
-    #         #
-    #         case _:
-    #             print(f"lol lmao you fricked up")
+
     def _update_weight_row(self, weight_entry):
         weight_value = {
             "disease_id": weight_entry["disease_id"],
@@ -1602,11 +1487,6 @@ class AdminWindow:
             bg=COLORS['entry_bg']
         )
         current_listbox.pack(side='left', fill='x', expand=True)
-        print("===")
-        print(current_related)
-        print("+++")
-        print(related_items)
-        print("===")
         # Populate listbox with current items
         for item_id in current_related:
             for related_item in related_items:
@@ -1818,6 +1698,8 @@ class AdminWindow:
             justify='left'
         )
         desc_label.pack(anchor='w', pady=(10, 20))
+    def _launch_diagnostics(self):
+        print("Launching diagnostic")
 
     def run(self):
         """Start the main loop"""
@@ -1826,5 +1708,6 @@ class AdminWindow:
 
 def open_admin_window(user_id, role):
     """Public function to open admin window"""
+    print(user_id, role)
     admin_window = AdminWindow(user_id, role)
     admin_window.run()

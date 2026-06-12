@@ -1,4 +1,4 @@
-
+import threading
 import tkinter as tk
 import API
 import admin
@@ -27,33 +27,23 @@ def open_role_window(role, user_id):
 
 def check_auth(username, password):
     result = False
-    try:
-        # Add your validation logic here
-        if not username or not password:
-            messagebox.showwarning("Ошибка", "Пожалуйста, заполните все поля")
-            # Return early but don't run finally block for this case
-            submit_btn.config(state='normal', text='Войти')
-            return
-
-        result, user_id = API.auth(username, password)
-        print("===", result)
-        print("==", user_id)
-        if result:
-            open_role_window(result, user_id)
+    if not username or not password:
+        messagebox.showwarning("Ошибка", "Пожалуйста, заполните все поля")
+        submit_btn.config(state='normal', text='Войти')
+        return
+    def on_auth_complete(success, role, user_id, error_message):
+        if success:
+            print("user_id, role")
+            open_role_window(role, user_id)
         else:
-            messagebox.showerror("Ошибка", "Неверный логин или пароль")
-            # Clear fields on failed attempt
+            messagebox.showerror("Ошибка", error_message)
             username_entry.delete(0, tk.END)
             password_entry.delete(0, tk.END)
             username_entry.focus_set()
-
-    except Exception as e:
-        messagebox.showerror("Ошибка", f"Произошла ошибка: {str(e)}")
-    finally:
-        # Only reset button state here, handle messages in try block
-        submit_btn.config(state='normal', text='Войти')
-
-
+            submit_btn.config(state='normal', text='Войти')
+    def safe_callback(success, role, user_id, error_message):
+        root.after(0, on_auth_complete, success, role, user_id, error_message)
+    API.auth(username, password, callback=safe_callback)
 
 def submit():
     submit_btn.config(state='disabled', text='Вход...')
