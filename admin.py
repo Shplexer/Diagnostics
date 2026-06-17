@@ -135,8 +135,8 @@ class AdminWindow:
                 selected_keys = ['personal_data', 'results']
             case 'Врач':
                 selected_keys = ['personal_data', 'user_info', 'results']
-            case 'Администратор':
-                selected_keys = [key for key in FRAME_DEFINITIONS.keys() if key != 'results']
+            # case 'Администратор':
+            #     selected_keys = [key for key in FRAME_DEFINITIONS.keys() if key != 'results']
             case _:
                 selected_keys = list(FRAME_DEFINITIONS.keys())
 
@@ -356,24 +356,103 @@ class AdminWindow:
         self._create_controls()
 
     def _create_main_frame(self):
-        self.main_frame = tk.Frame(self.root, bg=COLORS['bg'], padx=40, pady=40)
+        self.main_frame = tk.Frame(self.root, bg=COLORS['bg'], padx=20, pady=20)
         self.main_frame.pack(expand=True, fill='both')
 
         self.notebook_frame = tk.Frame(self.main_frame, bg=COLORS['bg'], padx=10, pady=10)
         self.notebook_frame.grid(row=0, column=0, sticky='nsew', padx=(0, 20))
 
-        self.info_frame = tk.Frame(self.main_frame,
-                                   highlightbackground=COLORS['highlight'],
-                                   highlightthickness=1,
-                                   padx=10, pady=10)
-        self.info_frame.grid(row=0, column=1, sticky='nsew')
+        # === REPLACE THE INFO FRAME WITH A SCROLLABLE CONTAINER ===
+        # Create a frame that will hold the canvas and scrollbar
+        self.info_container = tk.Frame(
+            self.main_frame,
+            highlightbackground=COLORS['highlight'],
+            highlightthickness=1,
+            bg=COLORS['bg']
+        )
+        self.info_container.grid(row=0, column=1, sticky='nsew')
 
-        self.info_frame.pack_propagate(False)  # Prevent frame from resizing to fit content
-        self.info_frame.config(width=400)  # Set fixed width in pixels
+        # Create canvas and scrollbar
+        self.info_canvas = tk.Canvas(
+            self.info_container,
+            bg=COLORS['bg'],
+            highlightthickness=0
+        )
 
-        self.main_frame.grid_columnconfigure(0, weight=3)  # 3/4 width for notebook
-        self.main_frame.grid_columnconfigure(1, weight=0)  # 1/4 width for info
+        self.info_scrollbar = ttk.Scrollbar(
+            self.info_container,
+            orient="vertical",
+            command=self.info_canvas.yview
+        )
+
+        # Create the actual info frame INSIDE the canvas
+        self.info_frame = tk.Frame(
+            self.info_canvas,
+            bg=COLORS['bg'],
+            padx=10,
+            pady=10
+        )
+
+        # Configure the canvas
+        self.info_canvas.configure(yscrollcommand=self.info_scrollbar.set)
+
+        # Create a window in the canvas for the info frame
+        self.canvas_window = self.info_canvas.create_window(
+            (0, 0),
+            window=self.info_frame,
+            anchor='nw',
+            width=self.info_container.winfo_width() - 20  # Account for scrollbar
+        )
+
+        # Pack the canvas and scrollbar
+        self.info_canvas.pack(side='left', fill='both', expand=True)
+        self.info_scrollbar.pack(side='right', fill='y')
+
+        # Bind events to update scroll region
+        self.info_frame.bind('<Configure>', self._on_info_frame_configure)
+        self.info_container.bind('<Configure>', self._on_info_container_configure)
+
+        # Enable mouse wheel scrolling
+        self._bind_mousewheel()
+
+        # Configure grid weights
+        self.main_frame.grid_columnconfigure(0, weight=3)
+        self.main_frame.grid_columnconfigure(1, weight=1)
         self.main_frame.grid_rowconfigure(0, weight=1)
+
+    def _on_info_frame_configure(self, event):
+        """Update scroll region when info frame changes size"""
+        self.info_canvas.configure(scrollregion=self.info_canvas.bbox('all'))
+
+    def _on_info_container_configure(self, event):
+        """Update canvas window width when container resizes"""
+        # Update the width of the canvas window to match container
+        self.info_canvas.itemconfig(
+            self.canvas_window,
+            width=event.width - 20  # Account for scrollbar width
+        )
+
+    def _bind_mousewheel(self):
+        """Bind mousewheel scrolling to the info frame"""
+
+        def on_mousewheel(event):
+            self.info_canvas.yview_scroll(int(-1 * (event.delta / 120)), 'units')
+
+        def on_mousewheel_linux(event):
+            if event.num == 4:
+                self.info_canvas.yview_scroll(-1, 'units')
+            elif event.num == 5:
+                self.info_canvas.yview_scroll(1, 'units')
+
+        # Windows and Mac
+        self.info_canvas.bind('<MouseWheel>', on_mousewheel)
+        self.info_frame.bind('<MouseWheel>', on_mousewheel)
+
+        # Linux
+        self.info_canvas.bind('<Button-4>', on_mousewheel_linux)
+        self.info_canvas.bind('<Button-5>', on_mousewheel_linux)
+        self.info_frame.bind('<Button-4>', on_mousewheel_linux)
+        self.info_frame.bind('<Button-5>', on_mousewheel_linux)
 
     def _create_notebook_and_tabs(self):
         """Create notebook widget and all tabs"""
@@ -1446,7 +1525,10 @@ class AdminWindow:
             # print(tree.item(selected_item)["values"], api_url)
             self.fill_info_frame(tree.item(selected_item)["values"], api_url)
 
-    def clear_frame(self, frame):
+    def clear_frame(self, frame=None):
+        """Clear the info frame or any frame"""
+        if frame is None:
+            frame = self.info_frame
         for widget in frame.winfo_children():
             widget.destroy()
 
@@ -1756,9 +1838,8 @@ class AdminWindow:
 
     def update_info_frame(self, description):
         """Update the info frame with description"""
-        # Clear info frame
-        for widget in self.info_frame.winfo_children():
-            widget.destroy()
+        # Clear info frame (not the canvas)
+        self.clear_frame(self.info_frame)
 
         # Add description label
         desc_label = tk.Label(
