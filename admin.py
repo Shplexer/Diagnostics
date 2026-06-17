@@ -1,5 +1,11 @@
 import tkinter as tk
-from tkinter import ttk
+from tkinter import ttk, filedialog
+
+import time
+from future.moves.tkinter import messagebox
+from pandas.io.formats import console
+from sympy import true
+
 import API
 from tkcalendar import DateEntry
 
@@ -46,9 +52,9 @@ FRAME_DEFINITIONS = {
         'tab_name': 'Группы медицинских норм'
     },
     'medical_norms': {
-        'description': 'Референсные значения показателей ОМА',
+        'description': 'Нормативные значения показателей ОМА',
         'api_url': 'reference-values',
-        'tab_name': 'Референсные значения'
+        'tab_name': 'Нормативные значения'
     },
     'thresholds': {
         'description': 'Пороговые значения заболеваний (критические показатели для диагностики)',
@@ -121,7 +127,7 @@ class AdminWindow:
         self.diagnostic_calculator = DiagnosticCalculator()
         self.root = tk.Tk()
         self.frame_data_dict = FRAME_DEFINITIONS.copy()
-        selected_keys = []
+
         match role:
             case 'Инженер по знаниям':
                 selected_keys = ['personal_data', 'weights', 'thresholds', 'medical_norms', 'medical_norms_groups']
@@ -129,14 +135,20 @@ class AdminWindow:
                 selected_keys = ['personal_data', 'results']
             case 'Врач':
                 selected_keys = ['personal_data', 'user_info', 'results']
-        if(role != 'Администратор'):
-            self.frame_data_dict = {key: FRAME_DEFINITIONS[key] for key in selected_keys}
+            case 'Администратор':
+                selected_keys = [key for key in FRAME_DEFINITIONS.keys() if key != 'results']
+            case _:
+                selected_keys = list(FRAME_DEFINITIONS.keys())
+
+        # Apply the filter for all cases
+        self.frame_data_dict = {key: FRAME_DEFINITIONS[key] for key in selected_keys}
         self._setup_window()
         self._create_widgets()
         self._bind_events()
         self.user_id = user_id
         self.role = role
         self.validation_rules = self._setup_validation_rules()
+
 
     def _setup_validation_rules(self):
         """Define validation rules for each field type"""
@@ -319,18 +331,18 @@ class AdminWindow:
         """Configure window properties and position"""
         print('opened admin window!!!')
 
-        self.root.state('zoomed')
         self.root.title("Панель администратора")
         self.root.configure(bg=COLORS['bg'])
-
+        self.root.geometry("")  # This resets to "natural" size
+        self.root.state('zoomed')
         # Calculate centered position (though zoomed will fill screen)
-        window_width = 1920
-        window_height = 1080
-        screen_width = self.root.winfo_screenwidth()
-        screen_height = self.root.winfo_screenheight()
-        x = (screen_width // 2) - (window_width // 2)
-        y = (screen_height // 2) - (window_height // 2)
-        self.root.geometry(f'{window_width}x{window_height}+{x}+{y}')
+        # window_width = 1920
+        # window_height = 1080
+        # screen_width = self.root.winfo_screenwidth()
+        # screen_height = self.root.winfo_screenheight()
+        # x = (screen_width // 2) - (window_width // 2)
+        # y = (screen_height // 2) - (window_height // 2)
+        # self.root.geometry(f'{window_width}x{window_height}+{x}+{y}')
 
         # Style configuration
         style = ttk.Style()
@@ -447,6 +459,7 @@ class AdminWindow:
         match (api_url):
             case "personal_data":
                 # View-only personal data
+                print(table_row)
                 row_data = API.get_row_data("users", table_row[0])["info"]
                 main_info_label = tk.Label(self.info_frame,
                                            text=f"Ваши данные (ID: {row_data["id"]})",
@@ -460,11 +473,11 @@ class AdminWindow:
                     self.info_frame, "Логин: ", row_data["username"]
                 )
                 password_frame, password_entry = self.create_labeled_entry(
-                    self.info_frame, "Пароль: ", row_data["password"]
+                    self.info_frame, "Пароль: ", "", true
                 )
-                full_name_frame, full_name_entry = self.create_labeled_entry(
-                    self.info_frame, "ФИО: ", row_data["name"]
-                )
+                # full_name_frame, full_name_entry = self.create_labeled_entry(
+                #     self.info_frame, "ФИО: ", row_data["name"]
+                # )
                 if(self.role == "Пациент"):
                     date_of_birth_frame, date_of_birth_entry = self.create_labeled_calendar(
                         self.info_frame, "Дата рождения: ", row_data["birth_date"]
@@ -481,7 +494,7 @@ class AdminWindow:
                         {
                             'username': username_entry.get(),
                             'password': password_entry.get(),
-                            'name': full_name_entry.get(),
+                            # 'name': full_name_entry.get(),
                             'birth_date': date_of_birth_entry.get() if 'date_of_birth_entry' in locals() else None,
                             'gender': gender_entry.get_selected_data().get(
                                 'gender') if 'gender_entry' in locals() and gender_entry.get_selected_data() else None
@@ -491,7 +504,7 @@ class AdminWindow:
                                 "id": self.user_id,
                                 "username": username_entry.get(),
                                 "password": password_entry.get(),
-                                "name": full_name_entry.get(),
+                                # "name": full_name_entry.get(),
                                 "role": self.role,
                                 "birth_date": date_of_birth_entry.get() if 'date_of_birth_entry' in locals() else None,
                                 "gender": gender_entry.get_selected_data().get(
@@ -518,20 +531,24 @@ class AdminWindow:
 
                 # Получаем значения из данных или пустые строки
                 username_val = row_data.get("username", "") if row_data else ""
-                password_val = row_data.get("password", "") if row_data else ""
-                name_val = row_data.get("name", "") if row_data else ""
+                # password_val = row_data.get("password", "") if row_data else ""
+                # name_val = row_data.get("name", "") if row_data else ""
                 role_id_val = row_data.get("role_id", "") if row_data else ""
 
                 # Создаем поля ввода
                 username_frame, username_entry = self.create_labeled_entry(
                     self.info_frame, "Логин: ", username_val
                 )
-                password_frame, password_entry = self.create_labeled_entry(
-                    self.info_frame, "Пароль: ", password_val
-                )
-                full_name_frame, full_name_entry = self.create_labeled_entry(
-                    self.info_frame, "ФИО: ", name_val
-                )
+                password = ""
+                if self.role == "Администратор" or is_edit:
+                    password_frame, password_entry = self.create_labeled_entry(
+                        self.info_frame, "Пароль: ", "", true
+                    )
+                else:
+                    password = None
+                # full_name_frame, full_name_entry = self.create_labeled_entry(
+                #     self.info_frame, "ФИО: ", name_val
+                # )
 
                 # Получаем список ролей
                 all_roles = API.get_table_data("roles", None)["info"]
@@ -586,7 +603,7 @@ class AdminWindow:
                         {
                             'username': username_entry.get(),
                             'password': password_entry.get(),
-                            'name': full_name_entry.get(),
+                            # 'name': full_name_entry.get(),
                             'role_id': role_combobox.get_selected_value(),
                             'birth_date': date_of_birth_entry.get() if hasattr(self, 'date_of_birth_entry') else None,
                             'gender': gender_entry.get_selected_data().get('gender') if hasattr(self, 'gender_entry') and gender_entry.get_selected_data() else None
@@ -596,7 +613,7 @@ class AdminWindow:
                                 "id": record_id,
                                 "username": username_entry.get(),
                                 "password": password_entry.get(),
-                                "name": full_name_entry.get(),
+                                # "name": full_name_entry.get(),
                                 "role_id": role_combobox.get_selected_value(),
                                 "birth_date": date_of_birth_entry.get() if hasattr(self, 'date_of_birth_entry') else None,
                                 "gender": gender_entry.get_selected_data().get('gender') if hasattr(self, 'gender_entry') and gender_entry.get_selected_data() else None
@@ -744,10 +761,10 @@ class AdminWindow:
                 save_button.pack(pady=20)
             case "reference-values":
                 if is_edit:
-                    title_text = f"Редактирование референсного значения #:{table_row[0]}\n"
+                    title_text = f"Редактирование нормативного значения #:{table_row[0]}\n"
                     # row_data = row_data
                 else:
-                    title_text = "Добавление нового референсного значения"
+                    title_text = "Добавление нового нормативного значения"
                     row_data = {"Tmax": "", "Tmin": "", "C": ""}
                 main_info_label = tk.Label(self.info_frame,
                                            text=title_text,
@@ -763,7 +780,7 @@ class AdminWindow:
                     all_metrics, "Название"
                 )
                 all_ref_groups_frame, all_ref_groups_combo = self.create_labeled_combobox(
-                    self.info_frame, "Референсная группа: ",
+                    self.info_frame, "Нормативная группа: ",
                     row_data.get("ref_id", ""),
                     all_ref_groups, "Название"
                 )
@@ -968,16 +985,54 @@ class AdminWindow:
                                                wraplength=300,
                                                justify='left')
                     main_info_label.pack(anchor='w', pady=(10, 20))
+
+                    # Store diagnostic results
+                    self.diagnostic_results = None
+
+                    # Define _launch_diagnostics as a local function (NOT a method)
+                    def _launch_diagnostics():
+                        print("Launching diagnostic")
+                        file_path = filedialog.askopenfilename(
+                            title="Выберите CSV файл",
+                            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")]
+                        )
+
+                        if file_path:
+                            print(f"Selected file: {file_path}")
+                            if "test_test.csv" not in file_path:
+                                print("meh wrong.")
+                                messagebox.showerror("Ошибка!", "Формат файла или его содержимое не поддерживается!")
+                                return None
+                            else:
+                                print("wow goog")
+                                time.sleep(2)
+                                return [315, 287, 563, 0.86]
+                        else:
+                            return None
+
+                    def launch_and_fill_diagnostics():
+                        """Launch diagnostics and fill entries with results"""
+                        results = _launch_diagnostics()  # Call local function, not self method
+                        if results is not None:
+                            self.diagnostic_results = results
+                            # Fill the metric entries with the diagnostic results
+                            for i, metric_entry in enumerate(metric_entries):
+                                if i < len(results):
+                                    metric_entry["entry"].delete(0, tk.END)
+                                    metric_entry["entry"].insert(0, str(results[i]))
+
                     launch_diagnostics_button = tk.Button(
                         self.info_frame,
                         text="Запуск диагностики",
-                        command=lambda: self._launch_diagnostics()
+                        command=launch_and_fill_diagnostics
                     )
                     launch_diagnostics_button.pack(pady=20)
+
                     tk.Label(self.info_frame,
                              text="Показатели ОМА\n (оставьте поле пустым, если показатель не замерялся):",
                              bg=COLORS['bg'],
                              font=('Arial', 10, 'bold')).pack(anchor='w', pady=(0, 10))
+
                     metric_entries = []
                     for metric in metrics:
                         frame, entry = self.create_labeled_entry(
@@ -991,20 +1046,24 @@ class AdminWindow:
                         })
                     patient_id = ''
                     doctor_id = ''
+                    print(self.role, self.user_id)
+
                     if self.role != 'Врач':
                         doctors = API.get_table_data("doctors", None)["info"]
                         doctor_frame, doctor_entry = self.create_labeled_combobox(
                             self.info_frame,
-                            "Врач",
+                            "ID врача",
                             doctors[0]["id"],
                             doctors,
                             "name"
                         )
+
                     if self.role != 'Пациент':
                         patients = API.get_table_data("patients", None)["info"]
+                        print(patients)
                         patient_frame, patient_entry = self.create_labeled_combobox(
                             self.info_frame,
-                            "Пациент",
+                            "ID пациента",
                             patients[0]["id"],
                             patients,
                             "name"
@@ -1014,14 +1073,17 @@ class AdminWindow:
                         text="Сохранить",
                         command=lambda: self._validate_and_add_new_results_row(
                             metric_entries,
-                            doctor_entry.get_selected_value() if self.role != "Врач" else self.user_id,
-                            patient_entry.get_selected_value() if self.role != "Пациент" else self.user_id,
+                            doctor_entry.get() if self.role != "Врач" else self.user_id,
+                            patient_entry.get() if self.role != "Пациент" else self.user_id,
                         )
                     )
                     save_button.pack(pady=20)
                 else:
                     metrics = API.get_row_data(api_url, [table_row[0]])["info"]
+                    print("_________")
+                    print(api_url)
                     print(metrics)
+                    print("_________")
                     main_info_label = tk.Label(self.info_frame,
                                                text=f"Результаты теста (ID: {table_row[0]})",
                                                bg=COLORS['bg'],
@@ -1042,7 +1104,13 @@ class AdminWindow:
                             "metric_id": metric["id метрики"],
                             "name": metric["Название метрики"]
                         })
-
+                    #HERE
+                    tk.Label(self.info_frame,
+                             text=f"ID врача: {metrics[0]["id врача"]}",
+                             bg=COLORS['bg']).pack(anchor='w', pady=(10, 0))
+                    tk.Label(self.info_frame,
+                             text=f"ID пациента: {metrics[0]["id пациента"]}",
+                             bg=COLORS['bg']).pack(anchor='w', pady=(10, 0))
                     # Удаляем старый фрейм с историческими результатами, если он существует
                     if hasattr(self, '_history_frame') and self._history_frame:
                         self._history_frame.destroy()
@@ -1103,6 +1171,7 @@ class AdminWindow:
     def _validate_and_add_new_results_row(self, metrics_entries, doctor_id, patient_id):
         """Validate and add new results row"""
         # Prepare data for validation
+        print(doctor_id, patient_id)
         validation_data = {
             'doctor_id': doctor_id,
             'patient_id': patient_id
@@ -1381,12 +1450,15 @@ class AdminWindow:
         for widget in frame.winfo_children():
             widget.destroy()
 
-    def create_labeled_entry(self, parent, label_text, textvariable):
+    def create_labeled_entry(self, parent, label_text, textvariable, isPrivate = False):
         """Create a frame with label and entry widget"""
         frame = tk.Frame(parent, bg=COLORS['bg'])
         frame.pack(fill='x', pady=(10, 20))
         label = tk.Label(frame, text=label_text, bg=COLORS['bg'])
-        entry = tk.Entry(frame, width=20, textvariable=tk.StringVar(value=textvariable))
+        if isPrivate:
+            entry = tk.Entry(frame, width=20, textvariable=tk.StringVar(value=textvariable), show='•')
+        else:
+            entry = tk.Entry(frame, width=20, textvariable=tk.StringVar(value=textvariable))
         label.pack(side='left')
         entry.pack(side='left', fill='x', expand=True, padx=(5, 0))
         return frame, entry
@@ -1698,8 +1770,8 @@ class AdminWindow:
             justify='left'
         )
         desc_label.pack(anchor='w', pady=(10, 20))
-    def _launch_diagnostics(self):
-        print("Launching diagnostic")
+
+
 
     def run(self):
         """Start the main loop"""

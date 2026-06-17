@@ -2,9 +2,9 @@
 import requests
 import threading
 
-# API_URL = 'http://localhost:3000/api/'
-API_URL = 'https://diagnostics-server.vercel.app/api/'
-
+#API_URL = 'http://localhost:3000/api/'
+#API_URL = 'https://diagnostics-server.vercel.app/api/'
+API_URL = 'https://diagnosticsserver-danaran319-q6k5.onreza.app/api/'
 def auth(username, password, callback=None):
     """Non-blocking authentication with proper error handling"""
 
@@ -31,13 +31,13 @@ def auth(username, password, callback=None):
             elif r.status_code == 500:
                 # Server error
                 if callback:
-                    callback(False, None, None, "Ошибка сервера. Попробуйте позже")
+                    callback(False, None, None, "Ошибка сервера. попробуйте позже")
                 return
 
             elif r.status_code != 200:
                 # Other unexpected status codes
                 if callback:
-                    callback(False, None, None, f"Неизвестная ошибка (код {r.status_code})")
+                    callback(False, None, None, f"Неизвеизвестная ошибка (код {r.status_code})")
                 return
 
             # If we get here, status is 200 - parse JSON
@@ -56,13 +56,13 @@ def auth(username, password, callback=None):
 
         except requests.exceptions.ConnectionError:
             if callback:
-                callback(False, None, None, "Нет соединения с сервером. Проверьте интернет")
+                callback(False, None, None, "Нет соединения с сервером. проверьте интернет")
             else:
                 return None, None
 
         except requests.exceptions.Timeout:
             if callback:
-                callback(False, None, None, "Превышено время ожидания ответа от сервера")
+                callback(False, None, None, "Превышено время ожидания ответа от cервера")
             else:
                 return None, None
 
